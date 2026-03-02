@@ -1,5 +1,7 @@
 # claude-cowork-rs
 
+![AI agents at a LAN party](assets/claude-cowork-rs-banner.jpg)
+
 Linux daemon for **Claude Desktop Cowork** (Local Agent Mode). Lets Claude Desktop delegate coding tasks to a local Claude Code instance on Linux — no VM required.
 
 ## How it works
