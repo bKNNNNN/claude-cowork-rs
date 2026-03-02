@@ -31,6 +31,7 @@ impl ManagedProcess {
         info!(process_id = %id, command = %resolved_cmd, "spawning process");
 
         let mut cmd = Command::new(&resolved_cmd);
+        // env is pre-built (daemon env + overlay + filtering), so clear and set explicitly
         cmd.args(args)
             .env_clear()
             .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
@@ -50,10 +51,11 @@ impl ManagedProcess {
 
         if !cwd.is_empty() {
             let real_cwd = remap::remap_cwd(cwd, &remaps);
+            debug!(original_cwd = %cwd, resolved_cwd = %real_cwd, "cwd resolution");
             if std::path::Path::new(&real_cwd).is_dir() {
                 cmd.current_dir(&real_cwd);
             } else {
-                warn!(cwd = %real_cwd, "working directory does not exist, using default");
+                warn!(original_cwd = %cwd, resolved_cwd = %real_cwd, "working directory does not exist, using default");
             }
         }
 
@@ -89,6 +91,7 @@ impl ManagedProcess {
                 let reader = BufReader::with_capacity(10 * 1024 * 1024, stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
+                    debug!(process_id = %pid, stream = "stdout", "{}", line);
                     if tx.send(Event::stdout(&pid, format!("{line}\n"))).is_err() {
                         break;
                     }
@@ -104,6 +107,7 @@ impl ManagedProcess {
                 let reader = BufReader::with_capacity(10 * 1024 * 1024, stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
+                    debug!(process_id = %pid, stream = "stderr", "{}", line);
                     if tx.send(Event::stdout(&pid, format!("{line}\n"))).is_err() {
                         break;
                     }
