@@ -1,15 +1,15 @@
 [package]
-name = "claude-cowork-linux"
+name = "claude-cowork-rs"
 version = "0.1.0"
 edition = "2024"
 description = "Linux daemon for Claude Desktop Cowork (Local Agent Mode)"
 license = "MIT"
-repository = "https://github.com/bKNNNNN/claude-cowork-linux"
+repository = "https://github.com/bKNNNNN/claude-cowork-rs"
 readme = "README.md"
 keywords = ["claude", "cowork", "linux", "daemon"]
 
 [[bin]]
-name = "claude-cowork-linux"
+name = "claude-cowork-rs"
 path = "src/main.rs"
 
 [dependencies]
