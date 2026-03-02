@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="bKNNNNN/claude-cowork-linux"
-BINARY_NAME="claude-cowork-linux"
+REPO="bKNNNNN/claude-cowork-rs"
+BINARY_NAME="claude-cowork-rs"
 INSTALL_DIR="$HOME/.local/bin"
 SERVICE_DIR="$HOME/.config/systemd/user"
 
@@ -22,10 +22,10 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Install claude-cowork-linux daemon for Claude Desktop Cowork on Linux.
+Install claude-cowork-rs daemon for Claude Desktop Cowork on Linux.
 
 Options:
-    --uninstall    Remove claude-cowork-linux
+    --uninstall    Remove claude-cowork-rs
     --no-service   Skip systemd service setup
     --help         Show this help
 
@@ -134,7 +134,7 @@ verify_install() {
 }
 
 do_uninstall() {
-    info "Uninstalling claude-cowork-linux..."
+    info "Uninstalling claude-cowork-rs..."
 
     # Stop service
     if systemctl --user is-active claude-cowork.service &>/dev/null; then
@@ -166,7 +166,7 @@ for arg in "$@"; do
     esac
 done
 
-info "Installing claude-cowork-linux..."
+info "Installing claude-cowork-rs..."
 
 target=$(detect_arch)
 version=$(get_latest_version)

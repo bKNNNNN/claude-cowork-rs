@@ -15,9 +15,9 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
-            artifact: claude-cowork-linux-x86_64-unknown-linux-musl
+            artifact: claude-cowork-rs-x86_64-unknown-linux-musl
           - target: aarch64-unknown-linux-musl
-            artifact: claude-cowork-linux-aarch64-unknown-linux-musl
+            artifact: claude-cowork-rs-aarch64-unknown-linux-musl
 
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
         run: cross build --release --target ${{ matrix.target }}
 
       - name: Rename binary
-        run: cp target/${{ matrix.target }}/release/claude-cowork-linux ${{ matrix.artifact }}
+        run: cp target/${{ matrix.target }}/release/claude-cowork-rs ${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -61,5 +61,5 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/claude-cowork-linux-x86_64-unknown-linux-musl/claude-cowork-linux-x86_64-unknown-linux-musl
-            artifacts/claude-cowork-linux-aarch64-unknown-linux-musl/claude-cowork-linux-aarch64-unknown-linux-musl
+            artifacts/claude-cowork-rs-x86_64-unknown-linux-musl/claude-cowork-rs-x86_64-unknown-linux-musl
+            artifacts/claude-cowork-rs-aarch64-unknown-linux-musl/claude-cowork-rs-aarch64-unknown-linux-musl

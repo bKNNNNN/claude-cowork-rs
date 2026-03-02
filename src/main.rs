@@ -15,7 +15,7 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(
-    name = "claude-cowork-linux",
+    name = "claude-cowork-rs",
     version,
     about = "Linux daemon for Claude Desktop Cowork (Local Agent Mode)"
 )]
