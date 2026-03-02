@@ -1,0 +1,14 @@
+[Unit]
+Description=Claude Desktop Cowork Linux Daemon
+Documentation=https://github.com/bKNNNNN/claude-cowork-linux
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/claude-cowork-linux
+Restart=on-failure
+RestartSec=3
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=default.target
