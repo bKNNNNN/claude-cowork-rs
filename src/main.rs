@@ -1,13 +1,7 @@
-mod backend;
-mod events;
-mod health;
-mod protocol;
-mod rpc;
-mod server;
-
 use std::sync::Arc;
 
 use clap::Parser;
+use claude_cowork_rs::{backend, health, server};
 use tokio::signal;
 use tokio::sync::mpsc;
 use tracing::{error, info};
