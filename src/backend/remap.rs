@@ -1,6 +1,11 @@
 use regex::Regex;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+
+use tracing::{debug, info};
+
+use crate::rpc::types::MountInfo;
 
 static SKILL_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#""content":"/[a-zA-Z0-9_-]+:"#).expect("invalid skill prefix regex")
@@ -13,9 +18,6 @@ pub struct PathRemap {
 }
 
 /// Remap VM paths in a string to real host paths.
-///
-/// VM paths look like `/sessions/<name>/mnt/<mount>` and get mapped
-/// to the real host path where the mount points to.
 pub fn remap_paths(input: &str, remaps: &[PathRemap]) -> String {
     let mut result = input.to_string();
     for r in remaps {
@@ -97,22 +99,148 @@ pub fn ensure_session_dir(name: &str) -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
-/// Filter environment variables: remove empty values and blocked keys.
-pub fn filter_env(env: &std::collections::HashMap<String, String>) -> Vec<(String, String)> {
+/// Build process environment: inherit daemon env, overlay requested vars, filter blocked keys.
+///
+/// Matches the Go implementation: starts with the current process environment,
+/// overlays the env vars from the spawn request, then strips blocked keys and empty values.
+pub fn build_env(
+    requested_env: &HashMap<String, String>,
+    remaps: &[PathRemap],
+) -> Vec<(String, String)> {
     const BLOCKED_KEYS: &[&str] = &["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"];
 
-    env.iter()
-        .filter(|(k, v)| !v.is_empty() && !BLOCKED_KEYS.contains(&k.as_str()))
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect()
+    // Start with the daemon's own environment
+    let mut env: HashMap<String, String> = std::env::vars().collect();
+
+    // Overlay requested env vars
+    for (k, v) in requested_env {
+        if v.is_empty() {
+            env.remove(k);
+        } else {
+            env.insert(k.clone(), v.clone());
+        }
+    }
+
+    // Remove blocked keys
+    for key in BLOCKED_KEYS {
+        env.remove(*key);
+    }
+
+    // Remap env var values containing VM paths
+    let env: Vec<(String, String)> = env
+        .into_iter()
+        .filter(|(_, v)| !v.is_empty())
+        .map(|(k, v)| {
+            if v.starts_with("/sessions/") {
+                let remapped = remap_paths(&v, remaps);
+                debug!(key = %k, original = %v, remapped = %remapped, "remap env var");
+                (k, remapped)
+            } else {
+                (k, v)
+            }
+        })
+        .collect();
+
+    env
+}
+
+/// Select the real workspace directory as cwd.
+///
+/// Instead of using the session dir (which has symlinked mounts that Glob can't follow),
+/// use the actual path of the first non-hidden, non-utility mount.
+pub fn select_workspace_cwd(
+    cwd: &str,
+    additional_mounts: &HashMap<String, MountInfo>,
+    remaps: &[PathRemap],
+) -> String {
+    // First, try to find a real workspace mount
+    let home = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .to_string_lossy()
+        .to_string();
+
+    for (mount_name, mount_info) in additional_mounts {
+        // Skip hidden mounts, uploads, outputs
+        if mount_name.starts_with('.')
+            || mount_name == "uploads"
+            || mount_name == "outputs"
+        {
+            continue;
+        }
+
+        let ws_path = &mount_info.path;
+        if Path::new(ws_path).is_dir() {
+            info!(mount = %mount_name, cwd = %ws_path, "using workspace mount as cwd");
+            return ws_path.clone();
+        }
+
+        // Try relative to home
+        let abs_path = format!("{home}/{ws_path}");
+        if Path::new(&abs_path).is_dir() {
+            info!(mount = %mount_name, cwd = %abs_path, "using workspace mount as cwd");
+            return abs_path;
+        }
+    }
+
+    // Fallback: remap the cwd if it's a VM path
+    if !cwd.is_empty() {
+        let needs_remap = remaps.iter().any(|r| cwd.starts_with(&r.from));
+        if needs_remap {
+            return remap_paths(cwd, remaps);
+        }
+        return cwd.to_string();
+    }
+
+    // Last resort: home directory
+    home
+}
+
+/// Remap command args: VM paths and strip SDK servers from --mcp-config.
+///
+/// The Go implementation replaces --mcp-config with `{"mcpServers":{}}` because
+/// SDK-type MCP servers require stdio proxying that the native backend can't provide.
+/// Without this, Claude Code hangs trying to connect to SDK servers.
+pub fn remap_args(args: &[String], remaps: &[PathRemap]) -> Vec<String> {
+    let mut result: Vec<String> = Vec::with_capacity(args.len());
+    let mut i = 0;
+
+    while i < args.len() {
+        if args[i] == "--mcp-config" && i + 1 < args.len() {
+            // Strip SDK servers from MCP config
+            result.push(args[i].clone());
+            result.push(r#"{"mcpServers":{}}"#.to_string());
+            info!("stripped SDK MCP servers from --mcp-config");
+            i += 2;
+            continue;
+        }
+
+        // Remap VM paths in args
+        let arg = &args[i];
+        if arg.starts_with("/sessions/") {
+            let remapped = remap_paths(arg, remaps);
+            debug!(original = %arg, remapped = %remapped, "remap arg");
+            result.push(remapped);
+        } else {
+            result.push(arg.clone());
+        }
+        i += 1;
+    }
+
+    result
 }
 
 /// Remap a working directory from VM path to real path.
+/// Only remaps if the path starts with a known VM prefix.
 pub fn remap_cwd(cwd: &str, remaps: &[PathRemap]) -> String {
     if cwd.is_empty() {
         return cwd.to_string();
     }
-    remap_paths(cwd, remaps)
+    let needs_remap = remaps.iter().any(|r| cwd.starts_with(&r.from));
+    if needs_remap {
+        remap_paths(cwd, remaps)
+    } else {
+        cwd.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -155,20 +283,52 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_env() {
-        let mut env = std::collections::HashMap::new();
-        env.insert("HOME".to_string(), "/home/user".to_string());
-        env.insert("EMPTY".to_string(), String::new());
-        env.insert("CLAUDECODE".to_string(), "1".to_string());
-        env.insert("CLAUDE_CODE_ENTRYPOINT".to_string(), "/foo".to_string());
-        env.insert("PATH".to_string(), "/usr/bin".to_string());
+    fn test_build_env_inherits_and_filters() {
+        let mut requested = HashMap::new();
+        requested.insert("CUSTOM_VAR".to_string(), "value".to_string());
+        requested.insert("CLAUDECODE".to_string(), "1".to_string());
+        requested.insert("EMPTY_VAR".to_string(), String::new());
 
-        let filtered = filter_env(&env);
-        let keys: Vec<&str> = filtered.iter().map(|(k, _)| k.as_str()).collect();
-        assert!(keys.contains(&"HOME"));
-        assert!(keys.contains(&"PATH"));
-        assert!(!keys.contains(&"EMPTY"));
-        assert!(!keys.contains(&"CLAUDECODE"));
-        assert!(!keys.contains(&"CLAUDE_CODE_ENTRYPOINT"));
+        let env = build_env(&requested, &[]);
+        let map: HashMap<&str, &str> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+
+        // Should have inherited HOME from daemon
+        assert!(map.contains_key("HOME"));
+        // Should have custom var
+        assert_eq!(map.get("CUSTOM_VAR"), Some(&"value"));
+        // Should NOT have blocked keys
+        assert!(!map.contains_key("CLAUDECODE"));
+        // Should NOT have empty vars
+        assert!(!map.contains_key("EMPTY_VAR"));
+    }
+
+    #[test]
+    fn test_remap_args_strips_mcp_config() {
+        let args = vec![
+            "--verbose".to_string(),
+            "--mcp-config".to_string(),
+            r#"{"mcpServers":{"sdk1":{"type":"sdk"}}}"#.to_string(),
+            "--model".to_string(),
+            "claude-opus-4-6".to_string(),
+        ];
+        let result = remap_args(&args, &[]);
+        assert_eq!(result[0], "--verbose");
+        assert_eq!(result[1], "--mcp-config");
+        assert_eq!(result[2], r#"{"mcpServers":{}}"#);
+        assert_eq!(result[3], "--model");
+    }
+
+    #[test]
+    fn test_remap_args_remaps_paths() {
+        let remaps = vec![PathRemap {
+            from: "/sessions/test".to_string(),
+            to: "/home/user/.local/share/claude-cowork/sessions/test".to_string(),
+        }];
+        let args = vec![
+            "--add-dir".to_string(),
+            "/sessions/test/mnt/app.asar".to_string(),
+        ];
+        let result = remap_args(&args, &remaps);
+        assert_eq!(result[1], "/home/user/.local/share/claude-cowork/sessions/test/mnt/app.asar");
     }
 }

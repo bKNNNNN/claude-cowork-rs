@@ -135,26 +135,23 @@ impl NativeBackend {
         // Build path remappings
         let remaps = remap::build_mount_remaps(&session_name, &sess_dir);
 
-        // Filter and prepare environment
-        let filtered_env = remap::filter_env(env);
+        // Build environment: inherit from daemon, overlay requested vars, filter blocked keys.
+        // The Go implementation does this — Claude Code needs HOME, PATH, etc.
+        let filtered_env = remap::build_env(env, &remaps);
 
-        // Remap cwd
-        let real_cwd = if cwd.is_empty() {
-            // Try to use first non-hidden mount as workspace
-            additional_mounts
-                .iter()
-                .find(|(name, _)| !name.starts_with('.'))
-                .map(|(_, info)| info.path.clone())
-                .unwrap_or_default()
-        } else {
-            remap::remap_cwd(cwd, &remaps)
-        };
+        // Select workspace cwd: use the real mount path (not session dir).
+        // Glob doesn't follow directory symlinks, so we use the actual workspace path.
+        let real_cwd = remap::select_workspace_cwd(cwd, additional_mounts, &remaps);
+        debug!(original_cwd = %cwd, resolved_cwd = %real_cwd, "cwd resolution");
+
+        // Remap args: VM paths and strip SDK servers from --mcp-config
+        let remapped_args = remap::remap_args(args, &remaps);
 
         // Spawn the process
         let proc = ManagedProcess::spawn(
             id.to_string(),
             command,
-            args,
+            &remapped_args,
             &filtered_env,
             &real_cwd,
             self.event_tx.clone(),

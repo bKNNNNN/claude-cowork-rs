@@ -101,6 +101,9 @@ async fn handle_spawn(params: serde_json::Value, backend: &Arc<NativeBackend>) -
     info!(
         process_id = %p.id,
         command = %p.command,
+        args = ?p.args,
+        cwd = %p.cwd,
+        mounts = ?p.additional_mounts.keys().collect::<Vec<_>>(),
         "spawn request"
     );
     match backend
